@@ -179,14 +179,14 @@ impl<'a> SrcSrvInterpreter<'a> {
         let mut map = HashMap::new();
         map.insert("targ".to_string(), self.base_path.clone());
         self.stream.add_vars_for_file(file_path, &mut map);
-        let target = self.eval_req("SRCSRVTRG", &mut map)?;
-        let ver_ctrl = self.eval_opt("SRCSRVVERCTRL", &mut map)?;
+        let target = self.evaluate_required_field("SRCSRVTRG", &mut map)?;
+        let ver_ctrl = self.evaluate_optional_field("SRCSRVVERCTRL", &mut map)?;
         if ver_ctrl.as_deref() == Some("http") {
             return Ok(HowToObtainSource::FromHttp { url: target });
         }
 
-        let command = self.eval_opt("SRCSRVCMD", &mut map)?;
-        let env = self.eval_opt("SRCSRVENV", &mut map)?;
+        let command = self.evaluate_optional_field("SRCSRVCMD", &mut map)?;
+        let env = self.evaluate_optional_field("SRCSRVENV", &mut map)?;
         if let Some(command) = command {
             let env = match env {
                 Some(env) => env
@@ -209,7 +209,7 @@ impl<'a> SrcSrvInterpreter<'a> {
         })
     }
 
-    pub fn eval_opt(
+    pub fn evaluate_optional_field(
         &self,
         var_name: &str,
         var_map: &mut HashMap<String, String>,
@@ -222,7 +222,7 @@ impl<'a> SrcSrvInterpreter<'a> {
         Ok(Some(val))
     }
 
-    pub fn eval_req(
+    pub fn evaluate_required_field(
         &self,
         var_name: &str,
         var_map: &mut HashMap<String, String>,
