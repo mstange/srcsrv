@@ -4,7 +4,7 @@ use std::result::Result;
 mod ast;
 mod errors;
 
-pub use ast::AstNode;
+use ast::AstNode;
 pub use errors::{EvalError, ParseError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,7 +35,7 @@ pub struct SrcSrvStream<'a> {
 }
 
 impl<'a> SrcSrvStream<'a> {
-    pub fn new_from_slice(stream: &'a [u8]) -> Result<SrcSrvStream<'a>, ParseError> {
+    pub fn parse(stream: &'a [u8]) -> Result<SrcSrvStream<'a>, ParseError> {
         let stream = std::str::from_utf8(stream).map_err(|_| ParseError::InvalidUtf8)?;
         let mut lines = stream.lines();
 
@@ -268,7 +268,7 @@ SRCSRVTRG=%http_extract_target%
 SRCSRV: source files ---------------------------------------
 D:\build\...\Interpreter.cpp*js/src/vm/Interpreter.cpp*24938c537a55f9db3913072d33b178b210e7d6b5
 SRCSRV: end ------------------------------------------------"#;
-        let stream = SrcSrvStream::new_from_slice(stream.as_bytes()).unwrap();
+        let stream = SrcSrvStream::parse(stream.as_bytes()).unwrap();
         assert_eq!(stream.version(), 2);
         assert_eq!(stream.datetime(), None);
         assert_eq!(stream.version_control_description(), Some("http"));
@@ -303,7 +303,7 @@ SRCSRV: source files ---------------------------------------
 c:\b\s\w\ir\cache\builder\src\third_party\pdfium\core\fdrm\fx_crypt.cpp*core/fdrm/fx_crypt.cpp*dab1161c861cc239e48a17e1a5d729aa12785a53*https://pdfium.googlesource.com/pdfium.git/+/dab1161c861cc239e48a17e1a5d729aa12785a53/core/fdrm/fx_crypt.cpp?format=TEXT*base64.b64decode
 c:\b\s\w\ir\cache\builder\src\third_party\pdfium\core\fdrm\fx_crypt_aes.cpp*core/fdrm/fx_crypt_aes.cpp*dab1161c861cc239e48a17e1a5d729aa12785a53*https://pdfium.googlesource.com/pdfium.git/+/dab1161c861cc239e48a17e1a5d729aa12785a53/core/fdrm/fx_crypt_aes.cpp?format=TEXT*base64.b64decode
 SRCSRV: end ------------------------------------------------"#;
-        let stream = SrcSrvStream::new_from_slice(stream.as_bytes()).unwrap();
+        let stream = SrcSrvStream::parse(stream.as_bytes()).unwrap();
         assert_eq!(stream.version(), 1);
         assert_eq!(stream.datetime(), Some("Fri Jul 30 14:11:46 2021"));
         assert_eq!(stream.version_control_description(), Some("Subversion"));
