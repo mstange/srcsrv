@@ -28,7 +28,7 @@ pub struct SrcSrvStream<'a> {
     version: u8,
     /// lowercase field name -> field value
     ini_fields: HashMap<String, &'a str>,
-    /// lowercase field name -> field value
+    /// lowercase field name -> (raw field value, parsed field value ast node)
     var_fields: HashMap<String, (&'a str, AstNode<'a>)>,
     /// lowercase original path -> [var1, ..., var10]
     source_file_entries: HashMap<String, Vec<&'a str>>,
