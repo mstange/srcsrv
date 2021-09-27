@@ -156,26 +156,14 @@ impl<'a> SrcSrvStream<'a> {
         Some(())
     }
 
-    pub fn interpreter_with_base_path(&self, base_path: &str) -> SrcSrvInterpreter<'_> {
-        SrcSrvInterpreter {
-            stream: self,
-            base_path: base_path.to_owned(),
-        }
-    }
-}
-
-pub struct SrcSrvInterpreter<'a> {
-    stream: &'a SrcSrvStream<'a>,
-
-    /// The base directory for extracted files, used as %targ%.
-    base_path: String,
-}
-
-impl<'a> SrcSrvInterpreter<'a> {
-    pub fn source_for_path(&self, file_path: &str) -> Result<HowToObtainSource, EvalError> {
+    pub fn source_for_path(
+        &self,
+        original_file_path: &str,
+        extraction_base_path: &str,
+    ) -> Result<HowToObtainSource, EvalError> {
         let mut map = HashMap::new();
-        map.insert("targ".to_string(), self.base_path.clone());
-        self.stream.add_vars_for_file(file_path, &mut map);
+        map.insert("targ".to_string(), extraction_base_path.to_string());
+        self.add_vars_for_file(original_file_path, &mut map);
         let target = self.evaluate_required_field("SRCSRVTRG", &mut map)?;
         let ver_ctrl = self.evaluate_optional_field("SRCSRVVERCTRL", &mut map)?;
         if ver_ctrl.as_deref() == Some("http") {
@@ -212,7 +200,7 @@ impl<'a> SrcSrvInterpreter<'a> {
         var_map: &mut HashMap<String, String>,
     ) -> Result<Option<String>, EvalError> {
         let var_name = var_name.to_ascii_lowercase();
-        if !self.stream.var_fields.contains_key(&var_name) {
+        if !self.var_fields.contains_key(&var_name) {
             return Ok(None);
         }
         let val = self.eval_impl(var_name, var_map, &mut vec![])?;
@@ -244,7 +232,6 @@ impl<'a> SrcSrvInterpreter<'a> {
         eval_stack.push(var_name.clone());
 
         let (_, node) = self
-            .stream
             .var_fields
             .get(&var_name)
             .ok_or(EvalError::UnknownVariable)?;
@@ -283,11 +270,11 @@ SRCSRV: end ------------------------------------------------"#;
         assert_eq!(stream.version(), 2);
         assert_eq!(stream.datetime(), None);
         assert_eq!(stream.version_control_description(), Some("http"));
-        let interpreter = stream.interpreter_with_base_path(r#"C:\Debugger\Cached Sources"#);
         assert_eq!(
-            interpreter
+            stream
                 .source_for_path(
-                    r#"D:\build\...\Interpreter.cpp"#
+                    r#"D:\build\...\Interpreter.cpp"#,
+                    r#"C:\Debugger\Cached Sources"#
                 )
                 .unwrap(),
             HowToObtainSource::FromHttp {
@@ -318,11 +305,11 @@ SRCSRV: end ------------------------------------------------"#;
         assert_eq!(stream.version(), 1);
         assert_eq!(stream.datetime(), Some("Fri Jul 30 14:11:46 2021"));
         assert_eq!(stream.version_control_description(), Some("Subversion"));
-        let interpreter = stream.interpreter_with_base_path(r#"C:\Debugger\Cached Sources"#);
         assert_eq!(
-            interpreter
+            stream
                 .source_for_path(
-                    r#"c:\b\s\w\ir\cache\builder\src\third_party\pdfium\core\fdrm\fx_crypt.cpp"#
+                    r#"c:\b\s\w\ir\cache\builder\src\third_party\pdfium\core\fdrm\fx_crypt.cpp"#,
+                    r#"C:\Debugger\Cached Sources"#,
                 )
                 .unwrap(),
             HowToObtainSource::ByExecutingCommand {
