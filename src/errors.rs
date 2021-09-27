@@ -17,6 +17,7 @@ pub enum ParseError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EvalError {
+    NoFileMatch,
     Recursion,
     UnknownVariable,
 }

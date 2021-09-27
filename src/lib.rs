@@ -138,24 +138,6 @@ impl<'a> SrcSrvStream<'a> {
             .map(|(val, _)| *val)
     }
 
-    pub fn add_vars_for_file(
-        &self,
-        file_path: &str,
-        map: &mut HashMap<String, String>,
-    ) -> Option<()> {
-        let vars = self
-            .source_file_entries
-            .get(&file_path.to_ascii_lowercase())?;
-
-        map.extend(
-            vars.iter()
-                .enumerate()
-                .map(|(i, var)| (format!("var{}", i + 1), var.to_string())),
-        );
-
-        Some(())
-    }
-
     pub fn source_for_path(
         &self,
         original_file_path: &str,
@@ -163,7 +145,8 @@ impl<'a> SrcSrvStream<'a> {
     ) -> Result<HowToObtainSource, EvalError> {
         let mut map = HashMap::new();
         map.insert("targ".to_string(), extraction_base_path.to_string());
-        self.add_vars_for_file(original_file_path, &mut map);
+        self.add_vars_for_file(original_file_path, &mut map)?;
+
         let target = self.evaluate_required_field("SRCSRVTRG", &mut map)?;
         let ver_ctrl = self.evaluate_optional_field("SRCSRVVERCTRL", &mut map)?;
         if ver_ctrl.as_deref() == Some("http") {
@@ -192,6 +175,25 @@ impl<'a> SrcSrvStream<'a> {
             version_ctrl: ver_ctrl,
             target_path: target,
         })
+    }
+
+    pub fn add_vars_for_file(
+        &self,
+        file_path: &str,
+        map: &mut HashMap<String, String>,
+    ) -> Result<(), EvalError> {
+        let vars = self
+            .source_file_entries
+            .get(&file_path.to_ascii_lowercase())
+            .ok_or(EvalError::NoFileMatch)?;
+
+        map.extend(
+            vars.iter()
+                .enumerate()
+                .map(|(i, var)| (format!("var{}", i + 1), var.to_string())),
+        );
+
+        Ok(())
     }
 
     pub fn evaluate_optional_field(
