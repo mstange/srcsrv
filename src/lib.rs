@@ -8,11 +8,11 @@ use ast::AstNode;
 pub use errors::{EvalError, ParseError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HowToObtainSource {
-    FromHttp {
+pub enum SourceRetrievalMethod {
+    Download {
         url: String,
     },
-    ByExecutingCommand {
+    ExecuteCommand {
         command: String,
         env: HashMap<String, String>,
         target_path: String,
@@ -142,7 +142,7 @@ impl<'a> SrcSrvStream<'a> {
         &self,
         original_file_path: &str,
         extraction_base_path: &str,
-    ) -> Result<HowToObtainSource, EvalError> {
+    ) -> Result<SourceRetrievalMethod, EvalError> {
         let mut map = HashMap::new();
         map.insert("targ".to_string(), extraction_base_path.to_string());
         self.add_vars_for_file(original_file_path, &mut map)?;
@@ -150,7 +150,7 @@ impl<'a> SrcSrvStream<'a> {
         let target = self.evaluate_required_field("SRCSRVTRG", &mut map)?;
         let ver_ctrl = self.evaluate_optional_field("SRCSRVVERCTRL", &mut map)?;
         if ver_ctrl.as_deref() == Some("http") {
-            return Ok(HowToObtainSource::FromHttp { url: target });
+            return Ok(SourceRetrievalMethod::Download { url: target });
         }
 
         let command = self.evaluate_optional_field("SRCSRVCMD", &mut map)?;
@@ -164,20 +164,20 @@ impl<'a> SrcSrvStream<'a> {
                     .collect(),
                 None => HashMap::new(),
             };
-            return Ok(HowToObtainSource::ByExecutingCommand {
+            return Ok(SourceRetrievalMethod::ExecuteCommand {
                 command,
                 env,
                 target_path: target,
             });
         }
 
-        Ok(HowToObtainSource::Other {
+        Ok(SourceRetrievalMethod::Other {
             version_ctrl: ver_ctrl,
             target_path: target,
         })
     }
 
-    pub fn add_vars_for_file(
+    fn add_vars_for_file(
         &self,
         file_path: &str,
         map: &mut HashMap<String, String>,
@@ -196,7 +196,7 @@ impl<'a> SrcSrvStream<'a> {
         Ok(())
     }
 
-    pub fn evaluate_optional_field(
+    fn evaluate_optional_field(
         &self,
         var_name: &str,
         var_map: &mut HashMap<String, String>,
@@ -209,7 +209,7 @@ impl<'a> SrcSrvStream<'a> {
         Ok(Some(val))
     }
 
-    pub fn evaluate_required_field(
+    fn evaluate_required_field(
         &self,
         var_name: &str,
         var_map: &mut HashMap<String, String>,
@@ -252,7 +252,7 @@ impl<'a> SrcSrvStream<'a> {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::{HowToObtainSource, SrcSrvStream};
+    use crate::{SourceRetrievalMethod, SrcSrvStream};
 
     #[test]
     fn firefox() {
@@ -279,7 +279,7 @@ SRCSRV: end ------------------------------------------------"#;
                     r#"C:\Debugger\Cached Sources"#
                 )
                 .unwrap(),
-            HowToObtainSource::FromHttp {
+            SourceRetrievalMethod::Download {
                 url: "https://hg.mozilla.org/mozilla-central//raw-file/24938c537a55f9db3913072d33b178b210e7d6b5/js/src/vm/Interpreter.cpp".to_string()
             }
         );
@@ -314,7 +314,7 @@ SRCSRV: end ------------------------------------------------"#;
                     r#"C:\Debugger\Cached Sources"#,
                 )
                 .unwrap(),
-            HowToObtainSource::ByExecutingCommand {
+            SourceRetrievalMethod::ExecuteCommand {
                 command: r#"cmd /c "mkdir "C:\Debugger\Cached Sources\core\fdrm\fx_crypt.cpp\dab1161c861cc239e48a17e1a5d729aa12785a53" & python -c "import urllib2, base64;url = \"https://pdfium.googlesource.com/pdfium.git/+/dab1161c861cc239e48a17e1a5d729aa12785a53/core/fdrm/fx_crypt.cpp?format=TEXT\";u = urllib2.urlopen(url);open(r\"C:\Debugger\Cached Sources\core\fdrm\fx_crypt.cpp\dab1161c861cc239e48a17e1a5d729aa12785a53\fx_crypt.cpp\", \"wb\").write(base64.b64decode(u.read()))""#.to_string(),
                 env: HashMap::new(),
                 target_path: r#"C:\Debugger\Cached Sources\core\fdrm\fx_crypt.cpp\dab1161c861cc239e48a17e1a5d729aa12785a53\fx_crypt.cpp"#.to_string()
