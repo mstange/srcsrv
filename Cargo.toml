@@ -13,3 +13,6 @@ exclude = ["/.github", "/tests"]
 
 [dependencies]
 memchr = "2.4.1"
+
+[dev-dependencies]
+pdb = "0.7.0"

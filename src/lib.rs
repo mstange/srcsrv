@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::result::Result;
 
 mod ast;
@@ -16,12 +16,22 @@ pub enum SourceRetrievalMethod {
     /// Evaluating the given command on the Windows Command shell with the given
     /// environment variables will create the source file at `target_path`.
     ExecuteCommand {
+        /// The command to execute.
         command: String,
+        /// The environment veriables to set during command execution.
         env: HashMap<String, String>,
+        /// An optional version control string.
         version_ctrl: Option<String>,
+        /// The path at which the extracted file will appear once the command has run.
         target_path: String,
-        error_description: Option<String>,
-        error_server: Option<String>,
+        /// An optional string which identifies files that use the same version control
+        /// system. Used for error persistence.
+        /// If a file encounters an error during command execution, and the command output
+        /// matches one of the strings in [`SrcSrvStream::error_persistence_command_output_strings()`],
+        /// execution of the command should be skipped for all future entries with the same
+        /// `error_persistence_version_control` value.
+        /// See <https://docs.microsoft.com/en-us/windows-hardware/drivers/debugger/language-specification-1#handling-server-errors>.
+        error_persistence_version_control: Option<String>,
     },
     /// Grab bag for other cases. Please file issues about any extra cases you need.
     Other {
@@ -29,6 +39,7 @@ pub enum SourceRetrievalMethod {
     },
 }
 
+/// A parsed representation of the `srcsrv` stream from a PDB file.
 pub struct SrcSrvStream<'a> {
     /// 1, 2 or 3, based on the VERSION={} field
     version: u8,
@@ -41,6 +52,19 @@ pub struct SrcSrvStream<'a> {
 }
 
 impl<'a> SrcSrvStream<'a> {
+    /// Parse the `srcsrv` stream. The stream bytes can be obtained with the help of
+    /// the [`PDB::named_stream` method from the `pdb` crate](https://docs.rs/pdb/0.7.0/pdb/struct.PDB.html#method.named_stream).
+    ///
+    /// ```
+    /// use srcsrv::SrcSrvStream;
+    ///
+    /// # fn wrapper<'s, S: pdb::Source<'s> + 's>(pdb: &mut pdb::PDB<'s, S>) -> std::result::Result<(), srcsrv::ParseError> {
+    /// if let Ok(srcsrv_stream) = pdb.named_stream(b"srcsrv") {
+    ///     let stream = SrcSrvStream::parse(srcsrv_stream.as_slice())?;
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn parse(stream: &'a [u8]) -> Result<SrcSrvStream<'a>, ParseError> {
         let stream = std::str::from_utf8(stream).map_err(|_| ParseError::InvalidUtf8)?;
         let mut lines = stream.lines();
@@ -132,16 +156,17 @@ impl<'a> SrcSrvStream<'a> {
         self.ini_fields.get("verctrl").cloned()
     }
 
-    pub fn get_ini_field(&self, field_name: &str) -> Option<&'a str> {
-        self.ini_fields
-            .get(&field_name.to_ascii_lowercase())
-            .cloned()
-    }
-
-    pub fn get_raw_var(&self, var_name: &str) -> Option<&'a str> {
+    pub fn error_persistence_command_output_strings(&self) -> HashSet<&'a str> {
         self.var_fields
-            .get(&var_name.to_ascii_lowercase())
-            .map(|(val, _)| *val)
+            .iter()
+            .filter_map(|(var_name, (var_value, _))| {
+                if var_name.starts_with(&"SRCSRVERRDESC".to_ascii_lowercase()) {
+                    Some(*var_value)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     pub fn source_for_path(
@@ -159,32 +184,19 @@ impl<'a> SrcSrvStream<'a> {
         original_file_path: &str,
         extraction_base_path: &str,
     ) -> Result<(SourceRetrievalMethod, HashMap<String, String>), EvalError> {
+        let error_persistence_version_control_var = self.get_raw_var("SRCSRVERRVAR");
         let mut map = HashMap::new();
-        map.insert("targ".to_string(), extraction_base_path.to_string());
         self.add_vars_for_file(original_file_path, &mut map)?;
+
+        let error_persistence_version_control =
+            error_persistence_version_control_var.and_then(|var| map.get(var).cloned());
+
+        map.insert("targ".to_string(), extraction_base_path.to_string());
 
         let target = self.evaluate_required_field("SRCSRVTRG", &mut map)?;
         let command = self.evaluate_optional_field("SRCSRVCMD", &mut map)?;
         let env = self.evaluate_optional_field("SRCSRVENV", &mut map)?;
         let version_ctrl = self.evaluate_optional_field("SRCSRVVERCTRL", &mut map)?;
-        let error_description = self.evaluate_optional_field("SRCSRVERRDESC", &mut map)?;
-        let err_var = self.evaluate_optional_field("SRCSRVERRVAR", &mut map)?;
-        let error_server = match err_var {
-            Some(err_var) => {
-                // The spec says:
-                // > Indicates which variable in a file entry corresponds to a version control server.
-                // > It is used by SrcSrv to identify commands that do not work, based on previous failures.
-                // > The format of the text is varX where X is the number of the variable being indicated.
-                // In fact, there seems to be a double indirection in the TF example:
-                // SRCSRVERRVAR is "var2", var2 is "VSTFDEVDIV_DEVDIV2", and VSTFDEVDIV_DEVDIV2 is a server URL.
-                if let Some(err_var_value) = map.get(&err_var.to_ascii_lowercase()).cloned() {
-                    self.evaluate_optional_field(&err_var_value, &mut map)?
-                } else {
-                    None
-                }
-            }
-            None => None,
-        };
 
         if version_ctrl.as_deref() == Some("http") {
             return Ok((SourceRetrievalMethod::Download { url: target }, map));
@@ -205,8 +217,7 @@ impl<'a> SrcSrvStream<'a> {
                     env,
                     target_path: target,
                     version_ctrl,
-                    error_description,
-                    error_server,
+                    error_persistence_version_control,
                 },
                 map,
             ));
@@ -218,6 +229,18 @@ impl<'a> SrcSrvStream<'a> {
             },
             map,
         ))
+    }
+
+    pub fn get_ini_field(&self, field_name: &str) -> Option<&'a str> {
+        self.ini_fields
+            .get(&field_name.to_ascii_lowercase())
+            .cloned()
+    }
+
+    pub fn get_raw_var(&self, var_name: &str) -> Option<&'a str> {
+        self.var_fields
+            .get(&var_name.to_ascii_lowercase())
+            .map(|(val, _)| *val)
     }
 
     fn add_vars_for_file(
@@ -362,8 +385,7 @@ SRCSRV: end ------------------------------------------------"#;
                 env: HashMap::new(),
                 target_path: r#"C:\Debugger\Cached Sources\core\fdrm\fx_crypt.cpp\dab1161c861cc239e48a17e1a5d729aa12785a53\fx_crypt.cpp"#.to_string(),
                 version_ctrl: None,
-                error_description: None,
-                error_server: None,
+                error_persistence_version_control: None,
             }
         );
     }
@@ -409,8 +431,7 @@ SRCSRV: end ------------------------------------------------"#;
                     env: HashMap::new(),
                     version_ctrl: Some("tfs".to_string()),
                     target_path: r#"C:\Debugger\Cached Sources\VSTFDEVDIV_DEVDIV2\DevDiv\Fx\Rel\NetFxRel3Stage\externalapis\legacy\vctools\vc12\inc\cvinfo.h\1363200\cvinfo.h"#.to_string(),
-                    error_description: Some("access".to_string()),
-                    error_server: Some("http://vstfdevdiv.redmond.corp.microsoft.com:8080/DevDiv2".to_string()),
+                    error_persistence_version_control: Some("VSTFDEVDIV_DEVDIV2".to_string()),
                 }
         );
     }
