@@ -1,0 +1,15 @@
+[package]
+name = "srcsrv"
+version = "0.1.0"
+edition = "2018"
+authors = ["Markus Stange <mstange.moz@gmail.com>"]
+description = "Interpret the contents of a srcsrv stream from a pdb file (Microsoft Source Server)."
+categories = ["development-tools::debugging"]
+keywords = ["PDB", "debug", "srcsrv", "indexing", "windows"]
+license = "MIT/Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/mstange/srcsrv"
+exclude = ["/.github", "/tests"]
+
+[dependencies]
+memchr = "2.4.1"
