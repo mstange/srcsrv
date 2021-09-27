@@ -427,7 +427,7 @@ SRCSRV: end ------------------------------------------------"#;
                 )
                 .unwrap(),
                 SourceRetrievalMethod::ExecuteCommand {
-                    command: "tf.exe view /version:1363200 /noprompt \"$/DevDiv/Fx/Rel/NetFxRel3Stage/externalapis/legacy/vctools/vc12/inc/cvinfo.h\" /server:http://vstfdevdiv.redmond.corp.microsoft.com:8080/DevDiv2 /output:C:\\Debugger\\Cached Sources\\VSTFDEVDIV_DEVDIV2\\DevDiv\\Fx\\Rel\\NetFxRel3Stage\\externalapis\\legacy\\vctools\\vc12\\inc\\cvinfo.h\\1363200\\cvinfo.h".to_string(),
+                    command: r#"tf.exe view /version:1363200 /noprompt "$/DevDiv/Fx/Rel/NetFxRel3Stage/externalapis/legacy/vctools/vc12/inc/cvinfo.h" /server:http://vstfdevdiv.redmond.corp.microsoft.com:8080/DevDiv2 /output:C:\Debugger\Cached Sources\VSTFDEVDIV_DEVDIV2\DevDiv\Fx\Rel\NetFxRel3Stage\externalapis\legacy\vctools\vc12\inc\cvinfo.h\1363200\cvinfo.h"#.to_string(),
                     env: HashMap::new(),
                     version_ctrl: Some("tfs".to_string()),
                     target_path: r#"C:\Debugger\Cached Sources\VSTFDEVDIV_DEVDIV2\DevDiv\Fx\Rel\NetFxRel3Stage\externalapis\legacy\vctools\vc12\inc\cvinfo.h\1363200\cvinfo.h"#.to_string(),
