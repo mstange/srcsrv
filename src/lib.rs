@@ -148,12 +148,9 @@ impl<'a> SrcSrvStream<'a> {
             .get(&file_path.to_ascii_lowercase())?;
 
         map.extend(
-            [
-                "var1", "var2", "var3", "var4", "var5", "var6", "var7", "var8", "var9", "var10",
-            ]
-            .iter()
-            .zip(vars.iter())
-            .map(|(k, v)| (k.to_string(), v.to_string())),
+            vars.iter()
+                .enumerate()
+                .map(|(i, var)| (format!("var{}", i + 1), var.to_string())),
         );
 
         Some(())
