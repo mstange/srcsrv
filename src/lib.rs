@@ -7,19 +7,25 @@ mod errors;
 use ast::AstNode;
 pub use errors::{EvalError, ParseError};
 
+/// Describes how the source file can be obtained.
+/// This may not handle all cases. Please file issues if you encounter missing functionality.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceRetrievalMethod {
-    Download {
-        url: String,
-    },
+    /// The source can be downloaded from the web, at the given URL.
+    Download { url: String },
+    /// Evaluating the given command on the Windows Command shell with the given
+    /// environment variables will create the source file at `target_path`.
     ExecuteCommand {
         command: String,
         env: HashMap<String, String>,
-        target_path: String,
-    },
-    Other {
         version_ctrl: Option<String>,
         target_path: String,
+        error_description: Option<String>,
+        error_server: Option<String>,
+    },
+    /// Grab bag for other cases. Please file issues about any extra cases you need.
+    Other {
+        raw_var_values: HashMap<String, String>,
     },
 }
 
@@ -143,18 +149,47 @@ impl<'a> SrcSrvStream<'a> {
         original_file_path: &str,
         extraction_base_path: &str,
     ) -> Result<SourceRetrievalMethod, EvalError> {
+        let (method, _) =
+            self.source_and_raw_var_values_for_path(original_file_path, extraction_base_path)?;
+        Ok(method)
+    }
+
+    pub fn source_and_raw_var_values_for_path(
+        &self,
+        original_file_path: &str,
+        extraction_base_path: &str,
+    ) -> Result<(SourceRetrievalMethod, HashMap<String, String>), EvalError> {
         let mut map = HashMap::new();
         map.insert("targ".to_string(), extraction_base_path.to_string());
         self.add_vars_for_file(original_file_path, &mut map)?;
 
         let target = self.evaluate_required_field("SRCSRVTRG", &mut map)?;
-        let ver_ctrl = self.evaluate_optional_field("SRCSRVVERCTRL", &mut map)?;
-        if ver_ctrl.as_deref() == Some("http") {
-            return Ok(SourceRetrievalMethod::Download { url: target });
-        }
-
         let command = self.evaluate_optional_field("SRCSRVCMD", &mut map)?;
         let env = self.evaluate_optional_field("SRCSRVENV", &mut map)?;
+        let version_ctrl = self.evaluate_optional_field("SRCSRVVERCTRL", &mut map)?;
+        let error_description = self.evaluate_optional_field("SRCSRVERRDESC", &mut map)?;
+        let err_var = self.evaluate_optional_field("SRCSRVERRVAR", &mut map)?;
+        let error_server = match err_var {
+            Some(err_var) => {
+                // The spec says:
+                // > Indicates which variable in a file entry corresponds to a version control server.
+                // > It is used by SrcSrv to identify commands that do not work, based on previous failures.
+                // > The format of the text is varX where X is the number of the variable being indicated.
+                // In fact, there seems to be a double indirection in the TF example:
+                // SRCSRVERRVAR is "var2", var2 is "VSTFDEVDIV_DEVDIV2", and VSTFDEVDIV_DEVDIV2 is a server URL.
+                if let Some(err_var_value) = map.get(&err_var.to_ascii_lowercase()).cloned() {
+                    self.evaluate_optional_field(&err_var_value, &mut map)?
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
+
+        if version_ctrl.as_deref() == Some("http") {
+            return Ok((SourceRetrievalMethod::Download { url: target }, map));
+        }
+
         if let Some(command) = command {
             let env = match env {
                 Some(env) => env
@@ -164,17 +199,25 @@ impl<'a> SrcSrvStream<'a> {
                     .collect(),
                 None => HashMap::new(),
             };
-            return Ok(SourceRetrievalMethod::ExecuteCommand {
-                command,
-                env,
-                target_path: target,
-            });
+            return Ok((
+                SourceRetrievalMethod::ExecuteCommand {
+                    command,
+                    env,
+                    target_path: target,
+                    version_ctrl,
+                    error_description,
+                    error_server,
+                },
+                map,
+            ));
         }
 
-        Ok(SourceRetrievalMethod::Other {
-            version_ctrl: ver_ctrl,
-            target_path: target,
-        })
+        Ok((
+            SourceRetrievalMethod::Other {
+                raw_var_values: map.clone(),
+            },
+            map,
+        ))
     }
 
     fn add_vars_for_file(
@@ -317,8 +360,58 @@ SRCSRV: end ------------------------------------------------"#;
             SourceRetrievalMethod::ExecuteCommand {
                 command: r#"cmd /c "mkdir "C:\Debugger\Cached Sources\core\fdrm\fx_crypt.cpp\dab1161c861cc239e48a17e1a5d729aa12785a53" & python -c "import urllib2, base64;url = \"https://pdfium.googlesource.com/pdfium.git/+/dab1161c861cc239e48a17e1a5d729aa12785a53/core/fdrm/fx_crypt.cpp?format=TEXT\";u = urllib2.urlopen(url);open(r\"C:\Debugger\Cached Sources\core\fdrm\fx_crypt.cpp\dab1161c861cc239e48a17e1a5d729aa12785a53\fx_crypt.cpp\", \"wb\").write(base64.b64decode(u.read()))""#.to_string(),
                 env: HashMap::new(),
-                target_path: r#"C:\Debugger\Cached Sources\core\fdrm\fx_crypt.cpp\dab1161c861cc239e48a17e1a5d729aa12785a53\fx_crypt.cpp"#.to_string()
+                target_path: r#"C:\Debugger\Cached Sources\core\fdrm\fx_crypt.cpp\dab1161c861cc239e48a17e1a5d729aa12785a53\fx_crypt.cpp"#.to_string(),
+                version_ctrl: None,
+                error_description: None,
+                error_server: None,
             }
+        );
+    }
+
+    #[test]
+    fn team_foundation() {
+        // From https://github.com/microsoft/perfview/blob/5c9f6059f54db41b4ac5c4fc8f57261779634489/src/TraceEvent/Symbols/NativeSymbolModule.cs#L776
+        let stream = r#"SRCSRV: ini ------------------------------------------------
+VERSION=3
+INDEXVERSION=2
+VERCTRL=Team Foundation Server
+DATETIME=Thu Mar 10 16:15:55 2016
+SRCSRV: variables ------------------------------------------
+TFS_EXTRACT_CMD=tf.exe view /version:%var4% /noprompt "$%var3%" /server:%fnvar%(%var2%) /output:%srcsrvtrg%
+TFS_EXTRACT_TARGET=%targ%\%var2%%fnbksl%(%var3%)\%var4%\%fnfile%(%var1%)
+VSTFDEVDIV_DEVDIV2=http://vstfdevdiv.redmond.corp.microsoft.com:8080/DevDiv2
+SRCSRVVERCTRL=tfs
+SRCSRVERRDESC=access
+SRCSRVERRVAR=var2
+SRCSRVTRG=%TFS_extract_target%
+SRCSRVCMD=%TFS_extract_cmd%
+SRCSRV: source files ---------------------------------            ------
+f:\dd\externalapis\legacy\vctools\vc12\inc\cvconst.h*VSTFDEVDIV_DEVDIV2*/DevDiv/Fx/Rel/NetFxRel3Stage/externalapis/legacy/vctools/vc12/inc/cvconst.h*1363200
+f:\dd\externalapis\legacy\vctools\vc12\inc\cvinfo.h*VSTFDEVDIV_DEVDIV2*/DevDiv/Fx/Rel/NetFxRel3Stage/externalapis/legacy/vctools/vc12/inc/cvinfo.h*1363200
+f:\dd\externalapis\legacy\vctools\vc12\inc\vc\ammintrin.h*VSTFDEVDIV_DEVDIV2*/DevDiv/Fx/Rel/NetFxRel3Stage/externalapis/legacy/vctools/vc12/inc/vc/ammintrin.h*1363200
+SRCSRV: end ------------------------------------------------"#;
+        let stream = SrcSrvStream::parse(stream.as_bytes()).unwrap();
+        assert_eq!(stream.version(), 3);
+        assert_eq!(stream.datetime(), Some("Thu Mar 10 16:15:55 2016"));
+        assert_eq!(
+            stream.version_control_description(),
+            Some("Team Foundation Server")
+        );
+        assert_eq!(
+            stream
+                .source_for_path(
+                    r#"F:\dd\externalapis\legacy\vctools\vc12\inc\cvinfo.h"#,
+                    r#"C:\Debugger\Cached Sources"#,
+                )
+                .unwrap(),
+                SourceRetrievalMethod::ExecuteCommand {
+                    command: "tf.exe view /version:1363200 /noprompt \"$/DevDiv/Fx/Rel/NetFxRel3Stage/externalapis/legacy/vctools/vc12/inc/cvinfo.h\" /server:http://vstfdevdiv.redmond.corp.microsoft.com:8080/DevDiv2 /output:C:\\Debugger\\Cached Sources\\VSTFDEVDIV_DEVDIV2\\DevDiv\\Fx\\Rel\\NetFxRel3Stage\\externalapis\\legacy\\vctools\\vc12\\inc\\cvinfo.h\\1363200\\cvinfo.h".to_string(),
+                    env: HashMap::new(),
+                    version_ctrl: Some("tfs".to_string()),
+                    target_path: r#"C:\Debugger\Cached Sources\VSTFDEVDIV_DEVDIV2\DevDiv\Fx\Rel\NetFxRel3Stage\externalapis\legacy\vctools\vc12\inc\cvinfo.h\1363200\cvinfo.h"#.to_string(),
+                    error_description: Some("access".to_string()),
+                    error_server: Some("http://vstfdevdiv.redmond.corp.microsoft.com:8080/DevDiv2".to_string()),
+                }
         );
     }
 }

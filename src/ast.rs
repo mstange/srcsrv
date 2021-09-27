@@ -133,7 +133,7 @@ mod tests {
     use crate::{AstNode, ParseError};
 
     #[test]
-    fn it_works() -> Result<(), ParseError> {
+    fn basic_parsing() -> Result<(), ParseError> {
         assert_eq!(
             AstNode::try_from_str("hello")?,
             AstNode::LiteralString("hello")
