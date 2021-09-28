@@ -198,10 +198,6 @@ impl<'a> SrcSrvStream<'a> {
         let env = self.evaluate_optional_field("SRCSRVENV", &mut map)?;
         let version_ctrl = self.evaluate_optional_field("SRCSRVVERCTRL", &mut map)?;
 
-        if version_ctrl.as_deref() == Some("http") {
-            return Ok((SourceRetrievalMethod::Download { url: target }, map));
-        }
-
         if let Some(command) = command {
             let env = match env {
                 Some(env) => env
@@ -221,6 +217,10 @@ impl<'a> SrcSrvStream<'a> {
                 },
                 map,
             ));
+        }
+
+        if target.starts_with("http://") || target.starts_with("https://") {
+            return Ok((SourceRetrievalMethod::Download { url: target }, map));
         }
 
         Ok((
@@ -327,13 +327,20 @@ VERSION=2
 INDEXVERSION=2
 VERCTRL=http
 SRCSRV: variables ------------------------------------------
-HGSERVER=https://hg.mozilla.org/mozilla-central/
+HGSERVER=https://hg.mozilla.org/mozilla-central
 SRCSRVVERCTRL=http
 HTTP_EXTRACT_TARGET=%hgserver%/raw-file/%var3%/%var2%
 SRCSRVTRG=%http_extract_target%
 SRCSRV: source files ---------------------------------------
-D:\build\...\Interpreter.cpp*js/src/vm/Interpreter.cpp*24938c537a55f9db3913072d33b178b210e7d6b5
-SRCSRV: end ------------------------------------------------"#;
+/builds/worker/checkouts/gecko/mozglue/build/SSE.cpp*mozglue/build/SSE.cpp*1706d4d54ec68fae1280305b70a02cb24c16ff68
+/builds/worker/checkouts/gecko/memory/build/mozjemalloc.cpp*memory/build/mozjemalloc.cpp*1706d4d54ec68fae1280305b70a02cb24c16ff68
+/builds/worker/checkouts/gecko/vs2017_15.8.4/VC/include/algorithm*vs2017_15.8.4/VC/include/algorithm*1706d4d54ec68fae1280305b70a02cb24c16ff68
+/builds/worker/checkouts/gecko/mozglue/baseprofiler/core/ProfilerBacktrace.cpp*mozglue/baseprofiler/core/ProfilerBacktrace.cpp*1706d4d54ec68fae1280305b70a02cb24c16ff68
+/builds/worker/workspace/obj-build/dist/include/mozilla/IntegerRange.h*mfbt/IntegerRange.h*1706d4d54ec68fae1280305b70a02cb24c16ff68
+SRCSRV: end ------------------------------------------------
+
+
+"#;
         let stream = SrcSrvStream::parse(stream.as_bytes()).unwrap();
         assert_eq!(stream.version(), 2);
         assert_eq!(stream.datetime(), None);
@@ -341,12 +348,12 @@ SRCSRV: end ------------------------------------------------"#;
         assert_eq!(
             stream
                 .source_for_path(
-                    r#"D:\build\...\Interpreter.cpp"#,
+                    r#"/builds/worker/checkouts/gecko/mozglue/baseprofiler/core/ProfilerBacktrace.cpp"#,
                     r#"C:\Debugger\Cached Sources"#
                 )
                 .unwrap(),
             SourceRetrievalMethod::Download {
-                url: "https://hg.mozilla.org/mozilla-central//raw-file/24938c537a55f9db3913072d33b178b210e7d6b5/js/src/vm/Interpreter.cpp".to_string()
+                url: "https://hg.mozilla.org/mozilla-central/raw-file/1706d4d54ec68fae1280305b70a02cb24c16ff68/mozglue/baseprofiler/core/ProfilerBacktrace.cpp".to_string()
             }
         );
     }
@@ -432,6 +439,43 @@ SRCSRV: end ------------------------------------------------"#;
                     version_ctrl: Some("tfs".to_string()),
                     target_path: r#"C:\Debugger\Cached Sources\VSTFDEVDIV_DEVDIV2\DevDiv\Fx\Rel\NetFxRel3Stage\externalapis\legacy\vctools\vc12\inc\cvinfo.h\1363200\cvinfo.h"#.to_string(),
                     error_persistence_version_control: Some("VSTFDEVDIV_DEVDIV2".to_string()),
+                }
+        );
+    }
+
+    #[test]
+    fn renderdoc() {
+        // From https://renderdoc.org/symbols/renderdoc.pdb/6D1DFFC4DC524537962CCABC000820641/renderdoc.pd_
+        let stream = r#"SRCSRV: ini ------------------------------------------------
+VERSION=2
+VERCTRL=http
+SRCSRV: variables ------------------------------------------
+HTTP_ALIAS=https://raw.githubusercontent.com/baldurk/renderdoc/v1.15/
+HTTP_EXTRACT_TARGET=%HTTP_ALIAS%%var2%
+SRCSRVTRG=%HTTP_EXTRACT_TARGET%
+SRCSRV: source files ---------------------------------------
+C:\build\renderdoc\qrenderdoc\Code\BufferFormatter.cpp*qrenderdoc/Code/BufferFormatter.cpp
+C:\build\renderdoc\qrenderdoc\Windows\Dialogs\AnalyticsConfirmDialog.cpp*qrenderdoc/Windows/Dialogs/AnalyticsConfirmDialog.cpp
+C:\build\renderdoc\renderdoc\data\glsl\gl_texsample.h*renderdoc/data/glsl/gl_texsample.h
+C:\build\renderdoc\renderdoc\driver\d3d12\d3d12_device.cpp*renderdoc/driver/d3d12/d3d12_device.cpp
+C:\build\renderdoc\renderdoc\maths\matrix.cpp*renderdoc/maths/matrix.cpp
+C:\build\renderdoc\util\test\demos\texture_zoo.cpp*util/test/demos/texture_zoo.cpp
+C:\build\renderdoc\Win32\Release\renderdoc_app.h*Win32/Release/renderdoc_app.h
+C:\build\renderdoc\x64\Release\renderdoc_app.h*x64/Release/renderdoc_app.h
+SRCSRV: end ------------------------------------------------"#;
+        let stream = SrcSrvStream::parse(stream.as_bytes()).unwrap();
+        assert_eq!(stream.version(), 2);
+        assert_eq!(stream.datetime(), None);
+        assert_eq!(stream.version_control_description(), Some("http"));
+        assert_eq!(
+            stream
+                .source_for_path(
+                    r#"C:\build\renderdoc\renderdoc\data\glsl\gl_texsample.h"#,
+                    r#"C:\Debugger\Cached Sources"#,
+                )
+                .unwrap(),
+                SourceRetrievalMethod::Download {
+                    url: "https://raw.githubusercontent.com/baldurk/renderdoc/v1.15/renderdoc/data/glsl/gl_texsample.h".to_string(),
                 }
         );
     }
