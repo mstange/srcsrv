@@ -14,7 +14,7 @@
 //!         r#"C:\build\renderdoc\renderdoc\data\glsl\gl_texsample.h"#,
 //!         r#"C:\Debugger\Cached Sources"#,
 //!     )? {
-//!         SourceRetrievalMethod::Download { url } => Some(url),
+//!         Some(SourceRetrievalMethod::Download { url }) => Some(url),
 //!         _ => None,
 //!     };
 //!     assert_eq!(url, Some("https://raw.githubusercontent.com/baldurk/renderdoc/v1.15/renderdoc/data/glsl/gl_texsample.h".to_string()));
