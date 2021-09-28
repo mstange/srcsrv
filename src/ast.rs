@@ -21,17 +21,17 @@ pub enum AstNode<'a> {
 }
 
 impl<'a> AstNode<'a> {
-    pub fn try_from_str(s: &'a str) -> Result<AstNode<'a>, ParseError> {
+    pub fn parse(s: &'a str) -> Result<AstNode<'a>, ParseError> {
         if s.is_empty() {
             return Ok(AstNode::LiteralString(""));
         }
         let s = s.as_bytes();
-        let (node, _rest) = Self::try_parse_all(s, false)?;
+        let (node, _rest) = Self::parse_all(s, false)?;
         Ok(node)
     }
 
-    fn try_parse_all(s: &'a [u8], nested: bool) -> Result<(AstNode<'a>, &'a [u8]), ParseError> {
-        let (node, rest) = Self::try_parse(s, false)?;
+    fn parse_all(s: &'a [u8], nested: bool) -> Result<(AstNode<'a>, &'a [u8]), ParseError> {
+        let (node, rest) = Self::parse_one(s, false)?;
         if rest.is_empty() || (nested && rest[0] == b')') {
             return Ok((node, rest));
         }
@@ -39,7 +39,7 @@ impl<'a> AstNode<'a> {
         let mut nodes = vec![node];
         let mut rest = rest;
         loop {
-            let (node, r) = Self::try_parse(rest, false)?;
+            let (node, r) = Self::parse_one(rest, false)?;
             nodes.push(node);
             rest = r;
             if rest.is_empty() || (nested && rest[0] == b')') {
@@ -49,7 +49,7 @@ impl<'a> AstNode<'a> {
     }
 
     // s must not be empty
-    fn try_parse(s: &'a [u8], nested: bool) -> Result<(AstNode<'a>, &'a [u8]), ParseError> {
+    fn parse_one(s: &'a [u8], nested: bool) -> Result<(AstNode<'a>, &'a [u8]), ParseError> {
         if s[0] != b'%' {
             // We have a literal at the beginning.
             let literal_end = if nested {
@@ -90,7 +90,7 @@ impl<'a> AstNode<'a> {
         if s.is_empty() || s[0] != b'(' {
             return Err(ParseError::MissingOpeningParen(function.to_string()));
         }
-        let (node, rest) = Self::try_parse_all(&s[1..], true)?;
+        let (node, rest) = Self::parse_all(&s[1..], true)?;
         if rest.is_empty() || rest[0] != b')' {
             return Err(ParseError::MissingClosingParen(function.to_string()));
         }
@@ -134,19 +134,16 @@ mod tests {
 
     #[test]
     fn basic_parsing() -> Result<(), ParseError> {
+        assert_eq!(AstNode::parse("hello")?, AstNode::LiteralString("hello"));
         assert_eq!(
-            AstNode::try_from_str("hello")?,
-            AstNode::LiteralString("hello")
-        );
-        assert_eq!(
-            AstNode::try_from_str("hello%world%")?,
+            AstNode::parse("hello%world%")?,
             AstNode::Sequence(vec![
                 AstNode::LiteralString("hello"),
                 AstNode::Variable("world")
             ])
         );
         assert_eq!(
-            AstNode::try_from_str("%hello%world")?,
+            AstNode::parse("%hello%world")?,
             AstNode::Sequence(vec![
                 AstNode::Variable("hello"),
                 AstNode::LiteralString("world")

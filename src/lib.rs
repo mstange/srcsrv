@@ -132,7 +132,7 @@ impl<'a> SrcSrvStream<'a> {
             }
 
             let (name, value) = line.split_once('=').ok_or(ParseError::MissingEquals)?;
-            let node = AstNode::try_from_str(value)?;
+            let node = AstNode::parse(value)?;
             var_fields.insert(name.to_ascii_lowercase(), (value, node));
         };
 
