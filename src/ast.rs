@@ -71,28 +71,28 @@ impl<'a> AstNode<'a> {
             std::str::from_utf8(&s[..second_percent_pos]).map_err(|_| ParseError::InvalidUtf8)?;
         match var_name.to_ascii_lowercase().as_str() {
             "fnvar" => {
-                let (node, rest) = Self::try_parse_args(rest)?;
+                let (node, rest) = Self::try_parse_args(rest, "fnvar")?;
                 Ok((AstNode::FnVar(Box::new(node)), rest))
             }
             "fnbksl" => {
-                let (node, rest) = Self::try_parse_args(rest)?;
+                let (node, rest) = Self::try_parse_args(rest, "fnbksl")?;
                 Ok((AstNode::FnBackslash(Box::new(node)), rest))
             }
             "fnfile" => {
-                let (node, rest) = Self::try_parse_args(rest)?;
+                let (node, rest) = Self::try_parse_args(rest, "fnfile")?;
                 Ok((AstNode::FnFile(Box::new(node)), rest))
             }
             _ => Ok((AstNode::Variable(var_name), rest)),
         }
     }
 
-    fn try_parse_args(s: &'a [u8]) -> Result<(AstNode<'a>, &'a [u8]), ParseError> {
+    fn try_parse_args(s: &'a [u8], function: &str) -> Result<(AstNode<'a>, &'a [u8]), ParseError> {
         if s.is_empty() || s[0] != b'(' {
-            return Err(ParseError::MissingOpeningBracket);
+            return Err(ParseError::MissingOpeningParen(function.to_string()));
         }
         let (node, rest) = Self::try_parse_all(&s[1..], true)?;
         if rest.is_empty() || rest[0] != b')' {
-            return Err(ParseError::MissingClosingBracket);
+            return Err(ParseError::MissingClosingParen(function.to_string()));
         }
         Ok((node, &rest[1..]))
     }

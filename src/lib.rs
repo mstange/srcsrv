@@ -90,7 +90,7 @@ impl<'a> SrcSrvStream<'a> {
             Some(&"1") => 1,
             Some(&"2") => 2,
             Some(&"3") => 3,
-            Some(_) => return Err(ParseError::UnrecognizedVersion),
+            Some(v) => return Err(ParseError::UnrecognizedVersion(v.to_string())),
             None => return Err(ParseError::MissingVersion),
         };
 
@@ -248,10 +248,13 @@ impl<'a> SrcSrvStream<'a> {
         file_path: &str,
         map: &mut HashMap<String, String>,
     ) -> Result<(), EvalError> {
-        let vars = self
+        let vars = match self
             .source_file_entries
             .get(&file_path.to_ascii_lowercase())
-            .ok_or(EvalError::NoFileMatch)?;
+        {
+            Some(vars) => vars,
+            None => return Err(EvalError::NoFileMatch(file_path.to_string())),
+        };
 
         map.extend(
             vars.iter()
@@ -294,15 +297,15 @@ impl<'a> SrcSrvStream<'a> {
             return Ok(val.clone());
         }
         if eval_stack.contains(&var_name) {
-            return Err(EvalError::Recursion);
+            return Err(EvalError::Recursion(var_name));
         }
 
         eval_stack.push(var_name.clone());
 
-        let (_, node) = self
-            .var_fields
-            .get(&var_name)
-            .ok_or(EvalError::UnknownVariable)?;
+        let node = match self.var_fields.get(&var_name) {
+            Some((_, node)) => node,
+            None => return Err(EvalError::UnknownVariable(var_name)),
+        };
         let mut get_var =
             |var_name: &str| self.eval_impl(var_name.to_ascii_lowercase(), var_map, eval_stack);
         let eval_val = node.eval(&mut get_var)?;
