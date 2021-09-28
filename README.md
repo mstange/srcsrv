@@ -6,7 +6,7 @@
 Parse a `srcsrv` stream from a Windows PDB file and look up file
 paths to see how the source for these paths can be obtained:
 
- - Either by downloading the file from a URL directly ([`SourceRetrievalMethod::Download`](https://docs.rs/srcsrv/0.2.0/srcsrv/enum.SourceRetrievalMethod.html#variant.Download),
+ - Either by downloading the file from a URL directly ([`SourceRetrievalMethod::Download`](https://docs.rs/srcsrv/0.2.0/srcsrv/enum.SourceRetrievalMethod.html#variant.Download)),
  - or by executing a command, which will create the file at a certain path ([`SourceRetrievalMethod::ExecuteCommand`](https://docs.rs/srcsrv/0.2.0/srcsrv/enum.SourceRetrievalMethod.html#variant.ExecuteCommand))
 
 ```rust
