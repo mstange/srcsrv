@@ -26,10 +26,11 @@ if let Ok(srcsrv_stream) = pdb.named_stream(b"srcsrv") {
 
 ```
 
-## Microsoft Documentation
+## Further reading
 
- - [Overview](https://docs.microsoft.com/en-us/windows/win32/debug/source-server-and-source-indexing)
- - [Language specification](https://docs.microsoft.com/en-us/windows-hardware/drivers/debugger/language-specification-1)
+ - [Source indexing for github projects](https://gist.github.com/baldurk/c6feb31b0305125c6d1a)
+ - [Microsoft documentation: Overview](https://docs.microsoft.com/en-us/windows/win32/debug/source-server-and-source-indexing)
+ - [Microsoft documentation: Language specification](https://docs.microsoft.com/en-us/windows-hardware/drivers/debugger/language-specification-1)
 
 ## License
 
