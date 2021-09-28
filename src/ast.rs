@@ -31,7 +31,7 @@ impl<'a> AstNode<'a> {
     }
 
     fn parse_all(s: &'a [u8], nested: bool) -> Result<(AstNode<'a>, &'a [u8]), ParseError> {
-        let (node, rest) = Self::parse_one(s, false)?;
+        let (node, rest) = Self::parse_one(s, nested)?;
         if rest.is_empty() || (nested && rest[0] == b')') {
             return Ok((node, rest));
         }
@@ -39,7 +39,7 @@ impl<'a> AstNode<'a> {
         let mut nodes = vec![node];
         let mut rest = rest;
         loop {
-            let (node, r) = Self::parse_one(rest, false)?;
+            let (node, r) = Self::parse_one(rest, nested)?;
             nodes.push(node);
             rest = r;
             if rest.is_empty() || (nested && rest[0] == b')') {
@@ -148,6 +148,10 @@ mod tests {
                 AstNode::Variable("hello"),
                 AstNode::LiteralString("world")
             ])
+        );
+        assert_eq!(
+            AstNode::parse("%fnfile%(world)")?,
+            AstNode::FnFile(Box::new(AstNode::LiteralString("world")))
         );
         Ok(())
     }
