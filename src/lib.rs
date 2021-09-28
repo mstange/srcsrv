@@ -243,15 +243,14 @@ impl<'a> SrcSrvStream<'a> {
         original_file_path: &str,
         extraction_base_path: &str,
     ) -> Result<Option<(SourceRetrievalMethod, EvalVarMap)>, EvalError> {
-        let error_persistence_version_control_var = self.get_raw_var("SRCSRVERRVAR");
-        let mut map = EvalVarMap::new();
-        let found = self.add_vars_for_file(original_file_path, &mut map)?;
-        if !found {
-            return Ok(None);
-        }
+        let mut map = match self.vars_for_file(original_file_path)? {
+            Some(map) => map,
+            None => return Ok(None),
+        };
 
-        let error_persistence_version_control =
-            error_persistence_version_control_var.and_then(|var| map.get(var).cloned());
+        let error_persistence_version_control = self
+            .get_raw_var("SRCSRVERRVAR")
+            .and_then(|var| map.get(&var.to_ascii_lowercase()).cloned());
 
         map.insert("targ".to_string(), extraction_base_path.to_string());
 
@@ -330,23 +329,22 @@ impl<'a> SrcSrvStream<'a> {
     }
 
     /// Add the values of var1, ..., var10 to the map, for the given file path.
-    /// Returns Ok(false) if the file was not found.
-    fn add_vars_for_file(&self, file_path: &str, map: &mut EvalVarMap) -> Result<bool, EvalError> {
+    /// Returns Ok(None) if the file was not found.
+    fn vars_for_file(&self, file_path: &str) -> Result<Option<EvalVarMap>, EvalError> {
         let vars = match self
             .source_file_entries
             .get(&file_path.to_ascii_lowercase())
         {
             Some(vars) => vars,
-            None => return Ok(false),
+            None => return Ok(None),
         };
 
-        map.extend(
+        Ok(Some(
             vars.iter()
                 .enumerate()
-                .map(|(i, var)| (format!("var{}", i + 1), var.to_string())),
-        );
-
-        Ok(true)
+                .map(|(i, var)| (format!("var{}", i + 1), var.to_string()))
+                .collect(),
+        ))
     }
 
     fn evaluate_optional_field(
