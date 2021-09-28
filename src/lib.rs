@@ -1,3 +1,28 @@
+//! Parse a `srcsrv` stream from a Windows PDB file and look up file
+//! paths to see how the source for these paths can be obtained:
+//!
+//!  - Either by downloading the file from a URL directly ([`SourceRetrievalMethod::Download`]),
+//!  - or by executing a command, which will create the file at a certain path ([`SourceRetrievalMethod::ExecuteCommand`])
+//!
+//! ```
+//! use srcsrv::{SrcSrvStream, SourceRetrievalMethod};
+//!
+//! # fn wrapper<'s, S: pdb::Source<'s> + 's>(pdb: &mut pdb::PDB<'s, S>) -> std::result::Result<(), Box<dyn std::error::Error>> {
+//! if let Ok(srcsrv_stream) = pdb.named_stream(b"srcsrv") {
+//!     let stream = SrcSrvStream::parse(srcsrv_stream.as_slice())?;
+//!     let url = match stream.source_for_path(
+//!         r#"C:\build\renderdoc\renderdoc\data\glsl\gl_texsample.h"#,
+//!         r#"C:\Debugger\Cached Sources"#,
+//!     )? {
+//!         SourceRetrievalMethod::Download { url } => Some(url),
+//!         _ => None,
+//!     };
+//!     assert_eq!(url, Some("https://raw.githubusercontent.com/baldurk/renderdoc/v1.15/renderdoc/data/glsl/gl_texsample.h".to_string()));
+//! }
+//! # Ok(())
+//! # }
+//! ```
+
 use std::collections::{HashMap, HashSet};
 use std::result::Result;
 
@@ -7,8 +32,10 @@ mod errors;
 use ast::AstNode;
 pub use errors::{EvalError, ParseError};
 
+/// A map of variables with their evaluated values.
+pub type EvalVarMap = HashMap<String, String>;
+
 /// Describes how the source file can be obtained.
-/// This may not handle all cases. Please file issues if you encounter missing functionality.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceRetrievalMethod {
     /// The source can be downloaded from the web, at the given URL.
@@ -34,9 +61,7 @@ pub enum SourceRetrievalMethod {
         error_persistence_version_control: Option<String>,
     },
     /// Grab bag for other cases. Please file issues about any extra cases you need.
-    Other {
-        raw_var_values: HashMap<String, String>,
-    },
+    Other { raw_var_values: EvalVarMap },
 }
 
 /// A parsed representation of the `srcsrv` stream from a PDB file.
@@ -144,49 +169,86 @@ impl<'a> SrcSrvStream<'a> {
         })
     }
 
+    /// The value of the VERSION field from the ini section.
     pub fn version(&self) -> u8 {
         self.version
     }
 
+    /// The value of the INDEXVERSION field from the ini section, if specified.
+    pub fn index_version(&self) -> Option<&'a str> {
+        self.ini_fields.get("indexversion").cloned()
+    }
+
+    /// The value of the DATETIME field from the ini section, if specified.
     pub fn datetime(&self) -> Option<&'a str> {
         self.ini_fields.get("datetime").cloned()
     }
 
+    /// The value of the VERCTRL field from the ini section, if specified.
     pub fn version_control_description(&self) -> Option<&'a str> {
         self.ini_fields.get("verctrl").cloned()
     }
 
-    pub fn error_persistence_command_output_strings(&self) -> HashSet<&'a str> {
-        self.var_fields
-            .iter()
-            .filter_map(|(var_name, (var_value, _))| {
-                if var_name.starts_with(&"SRCSRVERRDESC".to_ascii_lowercase()) {
-                    Some(*var_value)
-                } else {
-                    None
-                }
-            })
-            .collect()
-    }
-
+    /// Look up `original_file_path` in the file entries and find out how to obtain
+    /// the source for this file. This evaluates the variables for the matching file
+    /// entry.
+    ///
+    /// `extraction_base_path` is used as the value of the special `%targ%` variable
+    /// and should not include a trailing backslash.
+    ///
+    /// Returns `Ok(None)` if the file path was not found in the list of file entries.
+    ///
+    /// ```
+    /// use srcsrv::{SrcSrvStream, SourceRetrievalMethod};
+    ///
+    /// # fn wrapper() -> std::result::Result<(), Box<dyn std::error::Error>> {
+    /// # let stream = SrcSrvStream::parse(&[])?;
+    /// println!(
+    ///     "{:#?}",
+    ///     stream.source_for_path(
+    ///         r#"C:\build\renderdoc\renderdoc\data\glsl\gl_texsample.h"#,
+    ///         r#"C:\Debugger\Cached Sources"#
+    ///     )?
+    /// );
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn source_for_path(
         &self,
         original_file_path: &str,
         extraction_base_path: &str,
-    ) -> Result<SourceRetrievalMethod, EvalError> {
-        let (method, _) =
-            self.source_and_raw_var_values_for_path(original_file_path, extraction_base_path)?;
-        Ok(method)
+    ) -> Result<Option<SourceRetrievalMethod>, EvalError> {
+        match self.source_and_raw_var_values_for_path(original_file_path, extraction_base_path)? {
+            Some((method, _)) => Ok(Some(method)),
+            None => Ok(None),
+        }
     }
 
+    /// Look up `original_file_path` in the file entries and find out how to obtain
+    /// the source for this file. This evaluates the variables for the matching file
+    /// entry.
+    ///
+    /// `extraction_base_path` is used as the value of the special `%targ%` variable
+    /// and should not include a trailing backslash.
+    ///
+    /// This method additionally returns the raw values of all variables. This gives
+    /// consumers more ways to special-case their behavior. It also acts as an escape
+    /// hatch if there are any cases that `SourceRetrievalMethod` does not cover.
+    /// If you don't need the raw variable values, prefer to call `source_for_path`
+    /// instead.
+    ///
+    /// Returns `Ok(None)` if the file path was not found in the list of file entries.
     pub fn source_and_raw_var_values_for_path(
         &self,
         original_file_path: &str,
         extraction_base_path: &str,
-    ) -> Result<(SourceRetrievalMethod, HashMap<String, String>), EvalError> {
+    ) -> Result<Option<(SourceRetrievalMethod, EvalVarMap)>, EvalError> {
         let error_persistence_version_control_var = self.get_raw_var("SRCSRVERRVAR");
-        let mut map = HashMap::new();
-        self.add_vars_for_file(original_file_path, &mut map)?;
+        let mut map = EvalVarMap::new();
+        let found = self.add_vars_for_file(original_file_path, &mut map)?;
+        if !found {
+            return Ok(None);
+        }
 
         let error_persistence_version_control =
             error_persistence_version_control_var.and_then(|var| map.get(var).cloned());
@@ -207,7 +269,7 @@ impl<'a> SrcSrvStream<'a> {
                     .collect(),
                 None => HashMap::new(),
             };
-            return Ok((
+            return Ok(Some((
                 SourceRetrievalMethod::ExecuteCommand {
                     command,
                     env,
@@ -216,44 +278,66 @@ impl<'a> SrcSrvStream<'a> {
                     error_persistence_version_control,
                 },
                 map,
-            ));
+            )));
         }
 
         if target.starts_with("http://") || target.starts_with("https://") {
-            return Ok((SourceRetrievalMethod::Download { url: target }, map));
+            return Ok(Some((SourceRetrievalMethod::Download { url: target }, map)));
         }
 
-        Ok((
+        Ok(Some((
             SourceRetrievalMethod::Other {
                 raw_var_values: map.clone(),
             },
             map,
-        ))
+        )))
     }
 
+    /// A set of strings which can be substring-matched to the output of the
+    /// command that executed when obtaining source files.
+    ///
+    /// If any of the strings matches, it is recommended to "persist the error"
+    /// and refuse to execute further commands for other files with the same
+    /// `error_persistence_version_control` value.
+    pub fn error_persistence_command_output_strings(&self) -> HashSet<&'a str> {
+        self.var_fields
+            .iter()
+            .filter_map(|(var_name, (var_value, _))| {
+                if var_name.starts_with(&"SRCSRVERRDESC".to_ascii_lowercase()) {
+                    Some(*var_value)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Get the value of the specified field from the ini section.
+    /// The field name is case-insensitive.
     pub fn get_ini_field(&self, field_name: &str) -> Option<&'a str> {
         self.ini_fields
             .get(&field_name.to_ascii_lowercase())
             .cloned()
     }
 
+    /// Get the raw, unevaluated value of the specified field from the
+    /// variables section.
+    /// The field name is case-insensitive.
     pub fn get_raw_var(&self, var_name: &str) -> Option<&'a str> {
         self.var_fields
             .get(&var_name.to_ascii_lowercase())
             .map(|(val, _)| *val)
     }
 
-    fn add_vars_for_file(
-        &self,
-        file_path: &str,
-        map: &mut HashMap<String, String>,
-    ) -> Result<(), EvalError> {
+    /// Add the values of var1, ..., var10 to the map, for the given file path.
+    /// Returns Ok(false) if the file was not found.
+    fn add_vars_for_file(&self, file_path: &str, map: &mut EvalVarMap) -> Result<bool, EvalError> {
         let vars = match self
             .source_file_entries
             .get(&file_path.to_ascii_lowercase())
         {
             Some(vars) => vars,
-            None => return Err(EvalError::NoFileMatch(file_path.to_string())),
+            None => return Ok(false),
         };
 
         map.extend(
@@ -262,13 +346,13 @@ impl<'a> SrcSrvStream<'a> {
                 .map(|(i, var)| (format!("var{}", i + 1), var.to_string())),
         );
 
-        Ok(())
+        Ok(true)
     }
 
     fn evaluate_optional_field(
         &self,
         var_name: &str,
-        var_map: &mut HashMap<String, String>,
+        var_map: &mut EvalVarMap,
     ) -> Result<Option<String>, EvalError> {
         let var_name = var_name.to_ascii_lowercase();
         if !self.var_fields.contains_key(&var_name) {
@@ -281,7 +365,7 @@ impl<'a> SrcSrvStream<'a> {
     fn evaluate_required_field(
         &self,
         var_name: &str,
-        var_map: &mut HashMap<String, String>,
+        var_map: &mut EvalVarMap,
     ) -> Result<String, EvalError> {
         let var_name = var_name.to_ascii_lowercase();
         self.eval_impl(var_name, var_map, &mut vec![])
@@ -290,7 +374,7 @@ impl<'a> SrcSrvStream<'a> {
     fn eval_impl(
         &self,
         var_name: String,
-        var_map: &mut HashMap<String, String>,
+        var_map: &mut EvalVarMap,
         eval_stack: &mut Vec<String>,
     ) -> Result<String, EvalError> {
         if let Some(val) = var_map.get(&var_name) {
@@ -354,7 +438,7 @@ SRCSRV: end ------------------------------------------------
                     r#"/builds/worker/checkouts/gecko/mozglue/baseprofiler/core/ProfilerBacktrace.cpp"#,
                     r#"C:\Debugger\Cached Sources"#
                 )
-                .unwrap(),
+                .unwrap().unwrap(),
             SourceRetrievalMethod::Download {
                 url: "https://hg.mozilla.org/mozilla-central/raw-file/1706d4d54ec68fae1280305b70a02cb24c16ff68/mozglue/baseprofiler/core/ProfilerBacktrace.cpp".to_string()
             }
@@ -389,7 +473,7 @@ SRCSRV: end ------------------------------------------------"#;
                     r#"c:\b\s\w\ir\cache\builder\src\third_party\pdfium\core\fdrm\fx_crypt.cpp"#,
                     r#"C:\Debugger\Cached Sources"#,
                 )
-                .unwrap(),
+                .unwrap().unwrap(),
             SourceRetrievalMethod::ExecuteCommand {
                 command: r#"cmd /c "mkdir "C:\Debugger\Cached Sources\core\fdrm\fx_crypt.cpp\dab1161c861cc239e48a17e1a5d729aa12785a53" & python -c "import urllib2, base64;url = \"https://pdfium.googlesource.com/pdfium.git/+/dab1161c861cc239e48a17e1a5d729aa12785a53/core/fdrm/fx_crypt.cpp?format=TEXT\";u = urllib2.urlopen(url);open(r\"C:\Debugger\Cached Sources\core\fdrm\fx_crypt.cpp\dab1161c861cc239e48a17e1a5d729aa12785a53\fx_crypt.cpp\", \"wb\").write(base64.b64decode(u.read()))""#.to_string(),
                 env: HashMap::new(),
@@ -435,7 +519,7 @@ SRCSRV: end ------------------------------------------------"#;
                     r#"F:\dd\externalapis\legacy\vctools\vc12\inc\cvinfo.h"#,
                     r#"C:\Debugger\Cached Sources"#,
                 )
-                .unwrap(),
+                .unwrap().unwrap(),
                 SourceRetrievalMethod::ExecuteCommand {
                     command: r#"tf.exe view /version:1363200 /noprompt "$/DevDiv/Fx/Rel/NetFxRel3Stage/externalapis/legacy/vctools/vc12/inc/cvinfo.h" /server:http://vstfdevdiv.redmond.corp.microsoft.com:8080/DevDiv2 /output:C:\Debugger\Cached Sources\VSTFDEVDIV_DEVDIV2\DevDiv\Fx\Rel\NetFxRel3Stage\externalapis\legacy\vctools\vc12\inc\cvinfo.h\1363200\cvinfo.h"#.to_string(),
                     env: HashMap::new(),
@@ -476,7 +560,7 @@ SRCSRV: end ------------------------------------------------"#;
                     r#"C:\build\renderdoc\renderdoc\data\glsl\gl_texsample.h"#,
                     r#"C:\Debugger\Cached Sources"#,
                 )
-                .unwrap(),
+                .unwrap().unwrap(),
                 SourceRetrievalMethod::Download {
                     url: "https://raw.githubusercontent.com/baldurk/renderdoc/v1.15/renderdoc/data/glsl/gl_texsample.h".to_string(),
                 }

@@ -47,9 +47,6 @@ pub enum ParseError {
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum EvalError {
-    #[error("Could not find a srcsrv file entry for the path {0}.")]
-    NoFileMatch(String),
-
     #[error("Encountered recursion while evaluating srcsrv variable {0}.")]
     Recursion(String),
 

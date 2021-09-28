@@ -3,7 +3,30 @@
 
 # srcsrv
 
-Parses and interprets the `srcsrv` stream of a Windows PDB file.
+Parse a `srcsrv` stream from a Windows PDB file and look up file
+paths to see how the source for these paths can be obtained:
+
+ - Either by downloading the file from a URL directly ([`SourceRetrievalMethod::Download`](https://docs.rs/srcsrv/0.2.0/srcsrv/enum.SourceRetrievalMethod.html#variant.Download),
+ - or by executing a command, which will create the file at a certain path ([`SourceRetrievalMethod::ExecuteCommand`](https://docs.rs/srcsrv/0.2.0/srcsrv/enum.SourceRetrievalMethod.html#variant.ExecuteCommand))
+
+```rust
+use srcsrv::{SrcSrvStream, SourceRetrievalMethod};
+
+if let Ok(srcsrv_stream) = pdb.named_stream(b"srcsrv") {
+    let stream = SrcSrvStream::parse(srcsrv_stream.as_slice())?;
+    let url = match stream.source_for_path(
+        r#"C:\build\renderdoc\renderdoc\data\glsl\gl_texsample.h"#,
+        r#"C:\Debugger\Cached Sources"#,
+    )? {
+        SourceRetrievalMethod::Download { url } => Some(url),
+        _ => None,
+    };
+    assert_eq!(url, Some("https://raw.githubusercontent.com/baldurk/renderdoc/v1.15/renderdoc/data/glsl/gl_texsample.h".to_string()));
+}
+
+```
+
+## Microsoft Documentation
 
  - [Overview](https://docs.microsoft.com/en-us/windows/win32/debug/source-server-and-source-indexing)
  - [Language specification](https://docs.microsoft.com/en-us/windows-hardware/drivers/debugger/language-specification-1)
