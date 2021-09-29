@@ -1,6 +1,6 @@
 [package]
 name = "srcsrv"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2018"
 authors = ["Markus Stange <mstange.moz@gmail.com>"]
 description = "Interpret the contents of a srcsrv stream from a pdb file (Microsoft Source Server)."
