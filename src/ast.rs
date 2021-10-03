@@ -30,29 +30,35 @@ impl<'a> AstNode<'a> {
         Ok(node)
     }
 
-    fn parse_all(s: &'a [u8], nested: bool) -> Result<(AstNode<'a>, &'a [u8]), ParseError> {
-        let (node, rest) = Self::parse_one(s, nested)?;
-        if rest.is_empty() || (nested && rest[0] == b')') {
+    fn parse_all(
+        s: &'a [u8],
+        stop_at_closing_paren: bool,
+    ) -> Result<(AstNode<'a>, &'a [u8]), ParseError> {
+        let (node, rest) = Self::parse_one(s, stop_at_closing_paren)?;
+        if rest.is_empty() || (stop_at_closing_paren && rest[0] == b')') {
             return Ok((node, rest));
         }
 
         let mut nodes = vec![node];
         let mut rest = rest;
         loop {
-            let (node, r) = Self::parse_one(rest, nested)?;
+            let (node, r) = Self::parse_one(rest, stop_at_closing_paren)?;
             nodes.push(node);
             rest = r;
-            if rest.is_empty() || (nested && rest[0] == b')') {
+            if rest.is_empty() || (stop_at_closing_paren && rest[0] == b')') {
                 return Ok((AstNode::Sequence(nodes), rest));
             }
         }
     }
 
     // s must not be empty
-    fn parse_one(s: &'a [u8], nested: bool) -> Result<(AstNode<'a>, &'a [u8]), ParseError> {
+    fn parse_one(
+        s: &'a [u8],
+        stop_at_closing_paren: bool,
+    ) -> Result<(AstNode<'a>, &'a [u8]), ParseError> {
         if s[0] != b'%' {
             // We have a literal at the beginning.
-            let literal_end = if nested {
+            let literal_end = if stop_at_closing_paren {
                 memchr2(b'%', b')', s)
             } else {
                 memchr(b'%', s)
