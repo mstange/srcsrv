@@ -293,7 +293,7 @@ impl<'a> SrcSrvStream<'a> {
     }
 
     /// A set of strings which can be substring-matched to the output of the
-    /// command that executed when obtaining source files.
+    /// command that is executed when obtaining source files.
     ///
     /// If any of the strings matches, it is recommended to "persist the error"
     /// and refuse to execute further commands for other files with the same
