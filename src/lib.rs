@@ -328,7 +328,7 @@ impl<'a> SrcSrvStream<'a> {
             .map(|(val, _)| *val)
     }
 
-    /// Add the values of var1, ..., var10 to the map, for the given file path.
+    /// Create a map with the values of var1, ..., var10 for the given file path.
     /// Returns Ok(None) if the file was not found.
     fn vars_for_file(&self, file_path: &str) -> Result<Option<EvalVarMap>, EvalError> {
         let vars = match self
