@@ -356,7 +356,7 @@ impl<'a> SrcSrvStream<'a> {
         if !self.var_fields.contains_key(&var_name) {
             return Ok(None);
         }
-        let val = self.eval_impl(var_name, var_map, &mut vec![])?;
+        let val = self.eval_impl(var_name, var_map, &EvalStack::Empty)?;
         Ok(Some(val))
     }
 
@@ -366,14 +366,14 @@ impl<'a> SrcSrvStream<'a> {
         var_map: &mut EvalVarMap,
     ) -> Result<String, EvalError> {
         let var_name = var_name.to_ascii_lowercase();
-        self.eval_impl(var_name, var_map, &mut vec![])
+        self.eval_impl(var_name, var_map, &EvalStack::Empty)
     }
 
     fn eval_impl(
         &self,
         var_name: String,
         var_map: &mut EvalVarMap,
-        eval_stack: &mut Vec<String>,
+        eval_stack: &EvalStack,
     ) -> Result<String, EvalError> {
         if let Some(val) = var_map.get(&var_name) {
             return Ok(val.clone());
@@ -382,20 +382,32 @@ impl<'a> SrcSrvStream<'a> {
             return Err(EvalError::Recursion(var_name));
         }
 
-        eval_stack.push(var_name.clone());
-
         let node = match self.var_fields.get(&var_name) {
             Some((_, node)) => node,
             None => return Err(EvalError::UnknownVariable(var_name)),
         };
+
+        let eval_stack = EvalStack::WithAddedVar(&var_name, eval_stack);
         let mut get_var =
-            |var_name: &str| self.eval_impl(var_name.to_ascii_lowercase(), var_map, eval_stack);
+            |var_name: &str| self.eval_impl(var_name.to_ascii_lowercase(), var_map, &eval_stack);
         let eval_val = node.eval(&mut get_var)?;
         var_map.insert(var_name, eval_val.clone());
 
-        eval_stack.pop();
-
         Ok(eval_val)
+    }
+}
+
+enum EvalStack<'a> {
+    Empty,
+    WithAddedVar(&'a str, &'a EvalStack<'a>),
+}
+
+impl<'a> EvalStack<'a> {
+    pub fn contains(&self, s: &str) -> bool {
+        match self {
+            EvalStack::Empty => false,
+            EvalStack::WithAddedVar(var_name, rest) => *var_name == s || rest.contains(s),
+        }
     }
 }
 
@@ -403,7 +415,7 @@ impl<'a> SrcSrvStream<'a> {
 mod tests {
     use std::collections::HashMap;
 
-    use crate::{SourceRetrievalMethod, SrcSrvStream};
+    use crate::{EvalError, SourceRetrievalMethod, SrcSrvStream};
 
     #[test]
     fn firefox() {
@@ -562,6 +574,25 @@ SRCSRV: end ------------------------------------------------"#;
                 SourceRetrievalMethod::Download {
                     url: "https://raw.githubusercontent.com/baldurk/renderdoc/v1.15/renderdoc/data/glsl/gl_texsample.h".to_string(),
                 }
+        );
+    }
+
+    #[test]
+    fn recursion() {
+        let stream = r#"SRCSRV: ini ------------------------------------------------
+VERSION=2
+SRCSRV: variables ------------------------------------------
+A=recurse into %b%
+B=recurse into %C%
+C=recurse into %a%
+SRCSRVTRG=%a%
+SRCSRV: source files ---------------------------------------
+test
+SRCSRV: end ------------------------------------------------"#;
+        let stream = SrcSrvStream::parse(stream.as_bytes()).unwrap();
+        assert_eq!(
+            stream.source_for_path("test", ""),
+            Err(EvalError::Recursion("a".to_string()))
         );
     }
 }
