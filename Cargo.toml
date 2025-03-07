@@ -16,4 +16,4 @@ memchr = "2.4.1"
 thiserror = "2"
 
 [dev-dependencies]
-pdb = "0.7.0"
+pdb = "0.8"
