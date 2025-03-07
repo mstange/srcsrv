@@ -402,7 +402,7 @@ enum EvalStack<'a> {
     WithAddedVar(&'a str, &'a EvalStack<'a>),
 }
 
-impl<'a> EvalStack<'a> {
+impl EvalStack<'_> {
     pub fn contains(&self, s: &str) -> bool {
         match self {
             EvalStack::Empty => false,
